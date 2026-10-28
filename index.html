@@ -1,0 +1,1167 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>夜澜：音画互动</title>
+<style>
+:root{
+  --ink:#0c0f1d;      /* 外框深墨蓝 */
+  --wall:#2a3150;     /* 墙面 */
+  --mist:#9aa3c8;     /* 雾蓝 */
+  --frost:#e6eaff;    /* 霜白高光 */
+  --serif:"Songti SC","STSong","Noto Serif SC","Source Han Serif SC","SimSun",serif;
+  --sans:"PingFang SC","Microsoft YaHei","Noto Sans SC",system-ui,sans-serif;
+  color-scheme:dark;
+}
+[hidden]{display:none!important}
+html,body{margin:0;height:100%;background:var(--ink);overflow:hidden;color:var(--frost)}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block;cursor:crosshair;touch-action:none}
+
+.gate{
+  position:fixed;inset:0;display:grid;grid-template-columns:auto minmax(0,21em);
+  align-items:center;justify-content:start;gap:clamp(24px,4vw,64px);
+  padding:0 clamp(24px,8vw,140px);
+  background:linear-gradient(90deg,rgba(12,15,29,.86),rgba(12,15,29,.4) 50%,rgba(12,15,29,0) 80%);
+  transition:opacity 1.8s ease;
+}
+.gate.gone{opacity:0;pointer-events:none}
+.title{
+  writing-mode:vertical-rl;margin:0;font-family:var(--serif);font-weight:400;
+  font-size:clamp(56px,14vh,140px);line-height:1;letter-spacing:.2em;color:var(--frost);
+  text-shadow:0 0 40px rgba(160,175,255,.25);
+}
+.title small{display:block;font-size:.34em;letter-spacing:.5em;color:var(--mist);margin-right:.5em;margin-top:1.4em}
+.lede{font-family:var(--serif);font-size:15px;line-height:2;color:var(--mist);margin:0 0 2.2em;max-width:21em}
+.enter{
+  font-family:var(--serif);font-size:17px;letter-spacing:.6em;padding:.75em 1.4em .75em 2em;
+  color:var(--frost);background:rgba(230,234,255,.04);border:1px solid rgba(230,234,255,.35);
+  border-radius:2px;cursor:pointer;transition:background .4s,border-color .4s;
+}
+.enter.alt{font-size:14px;letter-spacing:.3em;margin-left:12px;border-color:rgba(230,234,255,.18);color:var(--mist)}
+.enter:hover{background:rgba(230,234,255,.12);border-color:rgba(230,234,255,.7)}
+.enter:focus-visible{outline:2px solid var(--frost);outline-offset:4px}
+
+.hud{position:fixed;left:clamp(16px,3vw,36px);bottom:clamp(14px,3vh,30px);font-family:var(--sans);font-size:12px;
+  color:var(--mist);opacity:.7;display:grid;gap:7px;transition:opacity .6s}
+.hud .row{display:grid;grid-template-columns:2.6em 72px auto;align-items:center;gap:10px}
+.hud i{display:block;height:1px;background:rgba(154,163,200,.22);position:relative;overflow:hidden}
+.hud i::after{content:"";position:absolute;inset:0;background:var(--frost);transform-origin:left;transform:scaleX(var(--v,0))}
+.hud em{font-style:normal;opacity:.6}
+.credit{position:fixed;right:clamp(16px,3vw,36px);bottom:clamp(14px,3vh,30px);font-family:var(--sans);font-size:12px;
+  color:var(--mist);text-align:right;transition:opacity .6s;display:grid;justify-items:end;gap:10px;max-width:min(420px,70vw)}
+.track{font-family:var(--serif);font-size:15px;color:var(--frost);display:flex;align-items:center;gap:.6em;max-width:100%}
+.track span:last-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--frost);box-shadow:0 0 10px var(--frost);flex:none;transition:opacity .3s}
+.paused .dot{opacity:.25;box-shadow:none}
+.actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.btn{font:inherit;font-size:13px;color:var(--frost);background:rgba(12,15,29,.45);border:1px solid rgba(230,234,255,.28);
+  padding:.45em 1em;border-radius:2px;cursor:pointer;backdrop-filter:blur(6px);transition:background .3s,border-color .3s}
+.btn:hover{background:rgba(230,234,255,.1);border-color:rgba(230,234,255,.6)}
+.btn:focus-visible{outline:2px solid var(--frost);outline-offset:3px}
+.hint{margin:0;opacity:.55;line-height:1.7}
+body.dragging canvas{filter:brightness(1.25)}
+.hidden-ui .hud,.hidden-ui .credit{opacity:0}
+.toast{position:fixed;left:50%;top:clamp(16px,4vh,40px);transform:translateX(-50%);font-family:var(--sans);font-size:13px;
+  color:var(--frost);background:rgba(12,15,29,.6);padding:.5em 1em;border-radius:2px;opacity:0;transition:opacity .5s;pointer-events:none}
+.toast.show{opacity:.9}
+.fatal{position:fixed;inset:0;display:none;place-items:center;font-family:var(--sans);color:var(--mist);padding:2em;text-align:center;line-height:1.8}
+
+@media (max-width:720px){
+  .hud{bottom:auto;top:16px}
+  .gate{grid-template-columns:1fr;align-content:center;justify-items:start;gap:28px;background:rgba(12,15,29,.6)}
+  .title{writing-mode:horizontal-tb;font-size:64px;letter-spacing:.15em}
+  .title small{display:inline;margin:0 0 0 .4em}
+}
+</style>
+</head>
+<body>
+<canvas id="c" aria-label="一个会听音乐的房间，墙面上有随音乐泛起的水波光影"></canvas>
+
+<section class="gate" id="gate">
+  <h1 class="title">夜澜<small>NOCTURNE</small></h1>
+  <div>
+    <p class="lede">一个会听音乐的房间。音乐的高音落下，墙上就泛起水光；低音让房间呼吸，每一拍都激起一圈大涟漪。<br>进入后移动鼠标环顾四周，滚动滚轮走进去，点击墙面也能激起涟漪。可以用自带的生成音乐，也可以换成你电脑里的歌。建议戴上耳机。</p>
+    <button class="enter" id="enter">进入</button>
+    <button class="enter alt" id="enterFile">用本地音乐进入</button>
+  </div>
+</section>
+
+<div class="hud" id="hud" hidden>
+  <div class="row"><span>低频</span><i id="mLow"></i><em>房间呼吸与光束</em></div>
+  <div class="row"><span>高频</span><i id="mHigh"></i><em>波源数量与亮度</em></div>
+  <div class="row"><span>节拍</span><i id="mBeat"></i><em>大涟漪</em></div>
+</div>
+<div class="credit" id="credit" hidden>
+  <div class="track"><span class="dot" id="dot"></span><span id="trackName">生成音乐：夜色铃音</span></div>
+  <div class="actions">
+    <button class="btn" id="pick">选择本地音乐</button>
+    <button class="btn" id="useGen" hidden>回到生成音乐</button>
+    <button class="btn" id="pause">暂停</button>
+  </div>
+  <input type="file" id="file" accept="audio/*,.mp3,.wav,.m4a,.flac,.ogg,.aac" hidden>
+  <p class="hint">也可以把音频文件拖进窗口　H 隐藏界面</p>
+</div>
+<div class="toast" id="toast" role="status"></div>
+<div class="fatal" id="fatal"></div>
+
+<script>
+'use strict';
+/* =========================================================================
+   夜澜 — 单文件 WebGL2 + Web Audio 音画互动
+   结构：
+   1. 盒子空间（一点透视房间）用光线求交在片元着色器里渲染
+   2. 五面墙展开成一张“十字形”网格，在上面跑波动方程（ping-pong）
+   3. 由波面曲率算焦散高光，RGB 三通道用不同强度 → 色散彩边；带拖影
+   4. 体积光束 + 漂浮尘埃 + 景深 + 辉光 + 色差
+   5. Web Audio 实时生成音乐，并用 FFT 分析驱动画面：
+        高频 → 波源数量与亮度   低频 → 呼吸与光束   节拍 → 大涟漪
+   ========================================================================= */
+
+// ---------- 空间尺寸（世界单位） ----------
+const BW = 8, BH = 4.3, D = 9;          // 半宽、半高、深度；开口在 z=0，后墙在 z=-D
+const NET_W = 2*D + 2*BW, NET_H = 2*D + 2*BH; // 展开网格尺寸
+const S = 40;                            // 每单位多少模拟像素（越高波纹越细）
+const SIM_W = Math.round(NET_W*S), SIM_H = Math.round(NET_H*S);
+const FOV = 40 * Math.PI/180, TAN = Math.tan(FOV/2);
+
+const $ = id => document.getElementById(id);
+const canvas = $('c');
+const gl = canvas.getContext('webgl2', {antialias:false, alpha:false, depth:false, premultipliedAlpha:false, powerPreference:'high-performance'});
+function fatal(msg){ const f=$('fatal'); f.textContent=msg; f.style.display='grid'; $('gate').style.display='none'; throw new Error(msg); }
+if(!gl) fatal('这个浏览器不支持 WebGL2。请用最新版 Chrome、Edge 或 Firefox 打开。');
+if(!gl.getExtension('EXT_color_buffer_float')) fatal('显卡不支持浮点渲染（EXT_color_buffer_float），无法运行水波模拟。');
+gl.getExtension('OES_texture_float_linear');
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// ---------- 着色器 ----------
+const VS_QUAD = `#version 300 es
+out vec2 vUv;
+void main(){ vec2 p = vec2(float((gl_VertexID<<1)&2), float(gl_VertexID&2)); vUv = p; gl_Position = vec4(p*2.0-1.0, 0.0, 1.0); }`;
+
+// 波动方程：r=高度 g=速度
+const FS_SIM = `#version 300 es
+precision highp float;
+uniform sampler2D uPrev;
+uniform vec2 uSize;
+uniform vec3 uNet;            // D, W, H（像素）
+uniform vec4 uDrops[24];
+uniform vec4 uDropP[24];   // x=相位 y=不对称强度 z=椭圆比 w=波动次数
+uniform int uDropCount;
+uniform float uDamp;
+out vec4 o;
+float h(ivec2 p){ return texelFetch(uPrev, clamp(p, ivec2(0), ivec2(uSize)-1), 0).r; }
+void main(){
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec2 c = texelFetch(uPrev, p, 0).rg;
+  float lap = h(p+ivec2(1,0)) + h(p-ivec2(1,0)) + h(p+ivec2(0,1)) + h(p-ivec2(0,1)) - 4.0*c.r;
+  float v = (c.g + 0.45*lap) * uDamp;
+  float ht = (c.r + v) * 0.9995;
+  for(int i=0;i<24;i++){
+    if(i>=uDropCount) break;
+    vec4 d = uDrops[i];
+    vec4 dp = uDropP[i];
+    vec2 rel = gl_FragCoord.xy - d.xy;
+    float ang = atan(rel.y, rel.x);
+    // 角向扰动：花瓣状、非对称的波源，激起的花瓣才会长短不一、带尖角
+    float wob = 1.0 + dp.y*(0.34*sin(ang*dp.w + dp.x) + 0.18*sin(ang*(dp.w*2.0+1.0) - dp.x*1.7));
+    float rr = length(rel) / (d.z*wob);
+    if(rr < 1.0) ht += d.w * 0.5 * (1.0 + cos(3.14159265*rr));
+  }
+  vec2 q = gl_FragCoord.xy;
+  bool inV = q.x >= uNet.x && q.x < uNet.x + uNet.y;
+  bool inH = q.y >= uNet.x && q.y < uNet.x + uNet.z;
+  if(!(inV || inH)){ ht = 0.0; v = 0.0; }
+  o = vec4(ht, v, 0.0, 1.0);
+}`;
+
+// 焦散：用平滑后高度场的拉普拉斯（曲率）近似光线汇聚；RGB 用不同强度 → 色散；max 反馈 → 拖影
+const FS_LIGHT = `#version 300 es
+precision highp float;
+uniform sampler2D uSim, uPrev;
+uniform vec2 uSize;
+uniform vec3 uNet;
+uniform float uK, uTrail, uGain, uDisp;
+out vec4 o;
+float H(ivec2 p){ return texelFetch(uSim, clamp(p, ivec2(0), ivec2(uSize)-1), 0).r; }
+float HS(ivec2 p){ return (H(p) + H(p+ivec2(1,0)) + H(p-ivec2(1,0)) + H(p+ivec2(0,1)) + H(p-ivec2(0,1))) * 0.2; }
+void main(){
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  vec2 q = gl_FragCoord.xy;
+  float c = HS(p);
+  // —— 软层：大尺度曲率，给出蓬松的光云 ——
+  float lap = HS(p+ivec2(2,0)) + HS(p-ivec2(2,0)) + HS(p+ivec2(0,2)) + HS(p-ivec2(0,2)) - 4.0*c;
+  // —— 尖层：雅可比行列式 det(I + k·Hessian)，det→0 处出现真实焦散尖角 ——
+  float hxx = HS(p+ivec2(2,0)) + HS(p-ivec2(2,0)) - 2.0*c;
+  float hyy = HS(p+ivec2(0,2)) + HS(p-ivec2(0,2)) - 2.0*c;
+  float hxy = (HS(p+ivec2(2,2)) - HS(p+ivec2(2,-2)) - HS(p-ivec2(2,2)) + HS(p-ivec2(2,-2)))*0.25;
+  float Dp = uNet.x, Wp = uNet.y, Hp = uNet.z;
+  float ex = min(abs(q.x-Dp), abs(q.x-Dp-Wp));
+  float ey = min(abs(q.y-Dp), abs(q.y-Dp-Hp));
+  float eb = min(min(q.x, uSize.x-q.x), min(q.y, uSize.y-q.y));
+  float e = min(min(ex, ey), eb);
+  float edge = exp(-e/14.0);                       // 越靠近墙角棱线越亮、色散越强
+  float k = uK * (1.0 + edge*0.7);
+  vec3 kk = k * vec3(0.92, 1.0, 1.09) * (1.0 + vec3(-1.0, 0.0, 1.0)*uDisp*(0.25+edge));
+  vec3 soft = clamp(1.0/max(vec3(0.10), 1.0 + kk*lap) - 1.0, 0.0, 8.0);
+  soft = 1.9*(1.0 - exp(-soft*0.30));
+  // 尖层：三通道用不同 k，产生沿尖角的色散
+  float sh = 0.0;
+  for(int ci=0; ci<3; ci++){
+    float kc = k*0.42*(1.0 + float(ci)*uDisp*0.55);
+    float det = (1.0 + kc*hxx)*(1.0 + kc*hyy) - (kc*hxy)*(kc*hxy);
+    float v = 1.0/max(abs(det), 0.05) - 1.0;
+    v = 1.0 - exp(-max(v,0.0)*0.14);
+    sh = max(sh, v);
+  }
+  // 尖层只调制软层：光云里长出尖角光丝，而不是单独画线
+  vec3 I = soft * (0.40 + 2.6*sh);
+  I *= uGain * (1.0 + edge*0.55);
+  vec3 prev = texelFetch(uPrev, p, 0).rgb * 4.0;
+  vec3 L = max(I, prev*uTrail);
+  bool inV = q.x >= Dp && q.x < Dp+Wp;
+  bool inH = q.y >= Dp && q.y < Dp+Hp;
+  if(!(inV || inH)) L = vec3(0.0);
+  o = vec4(L*0.25, 1.0);
+}`;
+
+// 主场景：光线与盒子求交 → 墙面底色 + 焦散 + 棱线彩虹 + 体积光束
+const FS_SCENE = `#version 300 es
+precision highp float;
+uniform vec2 uRes;
+uniform vec3 uCam;
+uniform mat3 uRot;
+uniform float uTan;
+uniform vec3 uBox;
+uniform vec2 uNet;
+uniform float uS;
+uniform sampler2D uLight;
+uniform float uTime, uLow, uHigh, uBeat, uFocus, uLightGain;
+uniform vec3 uBeamA, uBeamDir;
+out vec4 o;
+
+float hash(vec2 p){ p = fract(p*vec2(123.34, 456.21)); p += dot(p, p+45.32); return fract(p.x*p.y); }
+float vnoise(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+  return mix(mix(hash(i),hash(i+vec2(1,0)),f.x), mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x), f.y); }
+float fbm(vec2 p){ float a=0.5, s=0.0; for(int i=0;i<4;i++){ s+=a*vnoise(p); p*=2.03; a*=0.5; } return s; }
+
+vec2 netCoord(vec3 p, int w){
+  float W2 = uBox.x, H2 = uBox.y, Dd = uBox.z;
+  if(w==0) return vec2(Dd + p.x + W2, Dd + p.y + H2);
+  if(w==1) return vec2(-p.z, Dd + p.y + H2);
+  if(w==2) return vec2(Dd + 2.0*W2 + p.z + Dd, Dd + p.y + H2);
+  if(w==3) return vec2(Dd + p.x + W2, -p.z);
+  return vec2(Dd + p.x + W2, Dd + 2.0*H2 + p.z + Dd);
+}
+float edgeDist(vec3 p, int w){
+  float W2 = uBox.x, H2 = uBox.y, Dd = uBox.z;
+  if(w==0) return min(W2-abs(p.x), H2-abs(p.y));
+  if(w<=2) return min(H2-abs(p.y), min(p.z+Dd, -p.z));
+  return min(W2-abs(p.x), min(p.z+Dd, -p.z));
+}
+vec3 facade(vec3 p){
+  float dx = max(abs(p.x)-uBox.x, 0.0), dy = max(abs(p.y)-uBox.y, 0.0);
+  float d = length(vec2(dx, dy));
+  return vec3(0.055,0.064,0.12) + vec3(0.05,0.058,0.105)*exp(-d*1.1)*(0.85+0.3*uLow);
+}
+float beamDensity(vec3 q){
+  vec3 aq = q - uBeamA;
+  float along = dot(aq, uBeamDir);
+  vec3 perp = aq - along*uBeamDir;
+  float r = 1.0 + max(along, 0.0)*0.09;
+  float n = 0.65 + 0.35*sin(along*0.9 - uTime*0.35 + sin(q.x*0.7+uTime*0.2));
+  return exp(-dot(perp,perp)/(r*r)) * n * smoothstep(0.0, 3.0, along);
+}
+
+void main(){
+  vec2 ndc = gl_FragCoord.xy/uRes*2.0 - 1.0;
+  float asp = uRes.x/uRes.y;
+  vec3 rd = normalize(uRot * vec3(ndc.x*uTan*asp, ndc.y*uTan, -1.0));
+  vec3 ro = uCam;
+  float W2 = uBox.x, H2 = uBox.y, Dd = uBox.z;
+  vec3 col = vec3(0.03,0.035,0.07);
+  bool inside = ro.z <= 0.0 && abs(ro.x) < W2 && abs(ro.y) < H2 && ro.z > -Dd;
+  bool hitBox = inside;
+  float tEnter = 0.0;
+  if(!inside){
+    if(rd.z < 0.0 && ro.z > 0.0){
+      float t0 = -ro.z/rd.z; vec3 p0 = ro + rd*t0;
+      if(abs(p0.x) < W2 && abs(p0.y) < H2){ hitBox = true; tEnter = t0; }
+      else col = facade(p0);
+    }
+  }
+  if(hitBox){
+    vec3 sd = sign(rd) + vec3(equal(rd, vec3(0.0)));
+    vec3 rdx = rd + sd*1e-6;
+    vec3 ro2 = ro + rd*tEnter;
+    float tx = (sd.x*W2 - ro2.x)/rdx.x;
+    float ty = (sd.y*H2 - ro2.y)/rdx.y;
+    float tz = rd.z < 0.0 ? (-Dd - ro2.z)/rd.z : 1e9;
+    float tf = rd.z > 0.0 ? (-ro2.z)/rd.z : 1e9;
+    float t = min(min(tx, ty), min(tz, tf));
+    int w; vec3 n;
+    if(t == tz){ w = 0; n = vec3(0,0,1); }
+    else if(t == tx){ w = rd.x < 0.0 ? 1 : 2; n = vec3(-sd.x,0,0); }
+    else if(t == ty){ w = rd.y < 0.0 ? 3 : 4; n = vec3(0,-sd.y,0); }
+    else { w = -1; n = vec3(0,0,-1); }
+
+    t += tEnter;
+    if(w >= 0){
+      vec3 p = ro + rd*t;
+      vec2 nc = netCoord(p, w);
+      float e = edgeDist(p, w);
+      // 底色：靠近开口更亮，棱线有柔光，后墙中心偏暗
+      float zf = exp(p.z/(Dd*0.8));
+      float shade = 0.42 + 0.62*zf + 0.30*exp(-e/1.1) + 0.14*exp(-e/0.22);
+      if(w==0){ vec2 c = p.xy/vec2(W2,H2); shade *= 0.82 + 0.22*dot(c,c)*0.5; }
+      if(w==4) shade *= 1.12; if(w==3) shade *= 0.92;
+      shade *= 0.9 + 0.22*uLow;
+      float tex = fbm(nc*0.55 + vec2(0.0, uTime*0.01));
+      vec3 albedo = vec3(0.080, 0.092, 0.170);
+      vec3 base = albedo*shade*(0.9 + 0.2*tex);
+      // 光束落在墙上的光斑
+      vec3 aq = p - uBeamA; float al = dot(aq, uBeamDir); vec3 pp = aq - al*uBeamDir;
+      float br = 1.0 + max(al,0.0)*0.09;
+      base += vec3(0.07,0.085,0.15)*exp(-dot(pp,pp)/(br*br*2.6))*(0.2+0.5*uLow);
+
+      // 焦散：景深 + 抗锯齿 LOD，三通道错位采样 → 色散
+      float cosI = max(abs(dot(rd, n)), 0.15);
+      float lodAA = log2(max(1.0, t*2.0*uTan/uRes.y*uS/cosI));
+      float lod = clamp(max(lodAA, abs(t - uFocus)/max(uFocus, 2.0)*1.4), 0.0, 2.4);
+      vec2 uv = nc/uNet;
+      vec2 dir = normalize(nc - uNet*0.5 + 1e-4);
+      float edgeP = exp(-e/0.9);
+      vec2 off = dir*(0.03 + 0.22*edgeP + 0.12*uBeat)/uNet;
+      vec3 L;
+      L.r = textureLod(uLight, uv + off, lod).r;
+      L.g = textureLod(uLight, uv, lod).g;
+      L.b = textureLod(uLight, uv - off, lod).b;
+      L *= 4.0;
+      float Ll = dot(L, vec3(0.3,0.5,0.2));
+      // 绚丽配色：按墙面位置推进色相，焦散亮度再推一点
+      float hue = nc.x/uNet.x + nc.y/uNet.y*0.7 + Ll*0.5 + uTime*0.02;
+      vec3 chroma = 0.5 + 0.5*cos(6.2831*(hue + vec3(0.0, 0.33, 0.67)));
+      chroma = mix(vec3(1.0), chroma, 0.70);
+      col = base + mix(vec3(Ll), L, 0.6)*chroma*uLightGain;
+
+      // 棱线：细亮线 + 彩虹色散
+      float thin = exp(-e/0.08), soft = exp(-e/0.6);
+      float flow = pow(0.5 + 0.5*sin((nc.x + nc.y)*0.06 - uTime*2.2 + e*2.5), 5.0);
+      vec3 rainbow = 0.5 + 0.5*cos(6.2831*(e*1.4 + (nc.x+nc.y)*0.05 - uTime*0.10 + vec3(0.0,0.33,0.67)));
+      vec3 edgeCol = mix(vec3(0.88,0.92,1.0), rainbow*1.25, 0.62);
+      col += edgeCol*(thin*(0.07 + 0.45*uBeat + 0.75*flow) + soft*(0.025 + 0.9*Ll + 0.18*uHigh + 0.5*flow))*(0.35+0.65*zf);
+    } else {
+      col = vec3(0.025,0.03,0.06);
+    }
+
+    // 体积光束（射线步进）
+    float tExit = t;
+    float seg = max(tExit - tEnter, 0.0);
+    float acc = 0.0;
+    float j = hash(gl_FragCoord.xy + fract(uTime*1.7));
+    for(int i=0;i<20;i++) acc += beamDensity(ro + rd*(tEnter + seg*(float(i)+j)/20.0));
+    acc *= seg/20.0;
+    col += vec3(0.42,0.48,0.75)*acc*(0.005 + 0.014*uLow + 0.008*uBeat);
+  }
+  o = vec4(col, 1.0);
+}`;
+
+// 漂浮尘埃
+const VS_DUST = `#version 300 es
+layout(location=0) in vec4 aSeed;
+uniform mat4 uVP;
+uniform vec3 uCam, uBox, uBeamA, uBeamDir;
+uniform float uTime, uPx, uHigh, uBeat, uLow;
+out float vA;
+out vec3 vCol;
+void main(){
+  vec3 s = aSeed.xyz; float r = aSeed.w;
+  // 缓慢上浮 + 横向漂移，像浮在光里的尘
+  vec3 p = s + vec3(
+    sin(uTime*0.11 + r*31.0)*0.055 + sin(uTime*0.037 + r*7.0)*0.03,
+    uTime*0.012*(0.3 + r*1.2),
+    cos(uTime*0.09 + r*17.0)*0.05 + cos(uTime*0.045 + r*3.0)*0.03);
+  p = fract(p);
+  vec3 pos = vec3((p.x*2.0-1.0)*uBox.x*0.97, (p.y*2.0-1.0)*uBox.y*0.97, -0.2 - p.z*(uBox.z-0.4));
+  vec4 cp = uVP*vec4(pos, 1.0);
+  gl_Position = cp;
+  float vis = 1.0;
+  if(uCam.z > 0.0){
+    vec3 d = pos - uCam; float t = -uCam.z/d.z; vec2 q = uCam.xy + d.xy*t;
+    if(abs(q.x) > uBox.x || abs(q.y) > uBox.y) vis = 0.0;
+  }
+  if(cp.w < 0.1) vis = 0.0;
+  vec3 aq = pos - uBeamA; float al = dot(aq, uBeamDir); vec3 pp = aq - al*uBeamDir;
+  float br = 1.0 + max(al,0.0)*0.09;
+  float inBeam = exp(-dot(pp,pp)/(br*br*1.5))*0.5;
+  float tw = pow(0.5+0.5*sin(uTime*(1.5+r*4.0) + r*90.0), 8.0);
+  vA = vis*(0.10 + 0.9*inBeam*(0.4+0.8*uLow) + tw*(0.20+1.7*uHigh) + 0.6*uBeat*r);
+  gl_PointSize = vis*clamp((0.020 + r*0.055)*uPx/max(cp.w, 0.1), 1.0, 5.0);
+  // 粒子也带颜色：青、紫、品红、暖白之间
+  vCol = mix(vec3(0.70,0.82,1.0), 0.5+0.5*cos(6.2831*(r*1.7 + uTime*0.03 + vec3(0.0,0.33,0.67))), 0.75);
+}`;
+const FS_DUST = `#version 300 es
+precision highp float;
+in float vA;
+out vec4 o;
+in vec3 vCol;
+void main(){ vec2 d = gl_PointCoord - 0.5; float a = exp(-dot(d,d)*14.0)*vA; o = vec4(vCol*a, 1.0); }`;
+
+// 辉光
+const FS_BRIGHT = `#version 300 es
+precision highp float;
+in vec2 vUv; uniform sampler2D uTex; uniform vec2 uTexel; out vec4 o;
+void main(){
+  vec3 c = vec3(0.0);
+  c += texture(uTex, vUv + uTexel*vec2(-1,-1)).rgb; c += texture(uTex, vUv + uTexel*vec2(1,-1)).rgb;
+  c += texture(uTex, vUv + uTexel*vec2(-1, 1)).rgb; c += texture(uTex, vUv + uTexel*vec2(1, 1)).rgb;
+  c *= 0.25;
+  o = vec4(max(c - 0.44, 0.0), 1.0);
+}`;
+const FS_BLUR = `#version 300 es
+precision highp float;
+in vec2 vUv; uniform sampler2D uTex; uniform vec2 uDir; out vec4 o;
+void main(){
+  vec3 c = texture(uTex, vUv).rgb*0.227;
+  c += (texture(uTex, vUv + uDir*1.385).rgb + texture(uTex, vUv - uDir*1.385).rgb)*0.316;
+  c += (texture(uTex, vUv + uDir*3.231).rgb + texture(uTex, vUv - uDir*3.231).rgb)*0.070;
+  o = vec4(c, 1.0);
+}`;
+// 放射状光爆：从每个高亮波源向外甩出细长光丝
+// 12 个方向 × 10 步，步长二次增长 → 近处密、远处疏；每步轻微偏转 → 光丝带弧度
+const FS_STREAK = `#version 300 es
+precision highp float;
+in vec2 vUv; uniform sampler2D uTex; uniform vec2 uTexel; uniform float uRot, uLen, uSoft; out vec4 o;
+void main(){
+  vec3 acc = vec3(0.0);
+  for(int d=0; d<12; d++){
+    float a0 = uRot + float(d)*0.5235988;
+    float wob = sin(float(d)*2.31 + 1.7);
+    for(int i=1; i<=10; i++){
+      float fi = float(i);
+      float aa = a0 + wob*0.05*fi;               // 光丝弯曲
+      float r = (fi*fi*0.85 + fi*1.5)*uLen;      // 近密远疏
+      vec2 dir = vec2(cos(aa), sin(aa));
+      float w = exp(-fi*uSoft);
+      vec2 uv = vUv + dir*uTexel*r;
+      acc.r += texture(uTex, uv + dir*uTexel*fi*0.30).r*w;
+      acc.g += texture(uTex, uv).g*w;
+      acc.b += texture(uTex, uv - dir*uTexel*fi*0.30).b*w;
+    }
+  }
+  o = vec4(acc*0.040, 1.0);
+}`;
+const FS_COMP = `#version 300 es
+precision highp float;
+in vec2 vUv; uniform sampler2D uScene, uBloom, uStreak; uniform float uTime, uLow, uBeat, uStar; uniform vec2 uRes; out vec4 o;
+float hash(vec2 p){ p = fract(p*vec2(123.34, 456.21)); p += dot(p, p+45.32); return fract(p.x*p.y); }
+void main(){
+  vec2 dc = vUv - 0.5;
+  float r2 = dot(dc, dc);
+  float ca = 0.004 + 0.02*r2 + 0.006*uBeat;
+  vec3 c;
+  c.r = texture(uScene, vUv - dc*ca).r;
+  c.g = texture(uScene, vUv).g;
+  c.b = texture(uScene, vUv + dc*ca).b;
+  c += texture(uBloom, vUv).rgb*(0.65 + 0.35*uLow + 0.4*uBeat);
+  c += texture(uStreak, vUv).rgb*uStar;
+  c = 1.0 - exp(-c*1.35);
+  c = pow(c, vec3(1.06, 1.04, 0.98));
+  float vig = smoothstep(0.95, 0.2, length(dc*vec2(1.0, 1.25)));
+  c *= mix(0.38, 1.0, vig);
+  c += (hash(gl_FragCoord.xy + fract(uTime*7.0)*100.0) - 0.5)*0.022;
+  o = vec4(c, 1.0);
+}`;
+
+// ---------- WebGL 辅助 ----------
+function compile(type, src){
+  const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+  if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s) + '\n' + src.split('\n').map((l,i)=>(i+1)+': '+l).join('\n'));
+  return s;
+}
+function program(vs, fs){
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, vs)); gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if(!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  p._u = {};
+  return p;
+}
+const U = (p, n) => (n in p._u) ? p._u[n] : (p._u[n] = gl.getUniformLocation(p, n));
+function texture(w, h, ifmt, fmt, type, filter, mips){
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, ifmt, w, h, 0, fmt, type, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, mips ? gl.LINEAR_MIPMAP_LINEAR : filter);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  if(mips) gl.generateMipmap(gl.TEXTURE_2D);
+  t.w = w; t.h = h;
+  return t;
+}
+function fbo(tex){
+  const f = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  if(gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) fatal('无法创建渲染目标，显卡可能不支持浮点纹理。');
+  f.tex = tex;
+  return f;
+}
+function bindTex(unit, tex){ gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex); }
+
+let P;
+try{
+  P = {
+    sim: program(VS_QUAD, FS_SIM), light: program(VS_QUAD, FS_LIGHT), scene: program(VS_QUAD, FS_SCENE),
+    dust: program(VS_DUST, FS_DUST), bright: program(VS_QUAD, FS_BRIGHT), streak: program(VS_QUAD, FS_STREAK), blur: program(VS_QUAD, FS_BLUR), comp: program(VS_QUAD, FS_COMP)
+  };
+}catch(err){ console.error(err); fatal('着色器编译失败：' + String(err.message).split('\n')[0]); }
+
+const quadVAO = gl.createVertexArray();
+const sim = [0,1].map(()=>fbo(texture(SIM_W, SIM_H, gl.RGBA32F, gl.RGBA, gl.FLOAT, gl.NEAREST, false)));
+const light = [0,1].map(()=>fbo(texture(SIM_W, SIM_H, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, gl.LINEAR, true)));
+let simI = 0, lightI = 0;
+
+// 尘埃
+const DUST_N = 2600;
+const dustVAO = gl.createVertexArray();
+gl.bindVertexArray(dustVAO);
+const seeds = new Float32Array(DUST_N*4);
+for(let i=0;i<seeds.length;i++) seeds[i] = Math.random();
+const dustBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, dustBuf);
+gl.bufferData(gl.ARRAY_BUFFER, seeds, gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0);
+gl.vertexAttribPointer(0, 4, gl.FLOAT, false, 0, 0);
+gl.bindVertexArray(null);
+
+// 屏幕尺寸相关
+let RW = 0, RH = 0, sceneF, bloomA, bloomB, streakF;
+let quality = 1;
+function resize(){
+  const dpr = Math.min(window.devicePixelRatio || 1, 1.5)*quality;
+  let w = Math.floor(innerWidth*dpr), h = Math.floor(innerHeight*dpr);
+  const maxPx = 2.6e6;
+  if(w*h > maxPx){ const k = Math.sqrt(maxPx/(w*h)); w = Math.floor(w*k); h = Math.floor(h*k); }
+  if(w === RW && h === RH) return;
+  RW = w; RH = h; canvas.width = w; canvas.height = h;
+  [sceneF, bloomA, bloomB, streakF].forEach(f=>{ if(f){ gl.deleteTexture(f.tex); gl.deleteFramebuffer(f); } });
+  sceneF = fbo(texture(w, h, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, gl.LINEAR, false));
+  const bw = Math.max(1, w>>2), bh = Math.max(1, h>>2);
+  bloomA = fbo(texture(bw, bh, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, gl.LINEAR, false));
+  bloomB = fbo(texture(bw, bh, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, gl.LINEAR, false));
+  streakF = fbo(texture(bw, bh, gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, gl.LINEAR, false));
+}
+addEventListener('resize', resize);
+resize();
+
+// ---------- 向量与矩阵 ----------
+const v3 = {
+  sub:(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]], add:(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]],
+  mul:(a,s)=>[a[0]*s,a[1]*s,a[2]*s], dot:(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2],
+  cross:(a,b)=>[a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]],
+  norm:a=>{ const l=Math.hypot(a[0],a[1],a[2])||1; return [a[0]/l,a[1]/l,a[2]/l]; },
+  lerp:(a,b,t)=>[a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, a[2]+(b[2]-a[2])*t]
+};
+function mat4mul(a, b){
+  const o = new Float32Array(16);
+  for(let c=0;c<4;c++) for(let r=0;r<4;r++){ let s=0; for(let k=0;k<4;k++) s += a[k*4+r]*b[c*4+k]; o[c*4+r]=s; }
+  return o;
+}
+const clamp = (x,a=0,b=1)=>Math.min(b, Math.max(a, x));
+const lerp = (a,b,t)=>a+(b-a)*t;
+const rand = (a=0,b=1)=>a+Math.random()*(b-a);
+function gauss(){ return Math.sqrt(-2*Math.log(Math.random()+1e-9))*Math.cos(6.2831853*Math.random()); }
+
+// ---------- 相机 ----------
+const cam = { yaw:0, pitch:0, dolly:0, tYaw:0, tPitch:0, tDolly:0, pos:[0,0,14], fwd:[0,0,-1], right:[1,0,0], up:[0,1,0], vp:null };
+const pivot = [0, 0, -D*0.4];
+function fitDistance(){
+  const asp = RW/RH;
+  const distH = BH/(TAN*0.80);
+  const distW = BW/(TAN*asp*0.86);
+  return Math.max(distH, Math.min(distW, distH*1.7));
+}
+function updateCamera(dt, t, low, beatEnv){
+  const k = 1 - Math.exp(-dt*3.0);
+  cam.yaw = lerp(cam.yaw, cam.tYaw, k);
+  cam.pitch = lerp(cam.pitch, cam.tPitch, k);
+  cam.dolly = lerp(cam.dolly, cam.tDolly, 1 - Math.exp(-dt*2.0));
+  const drift = reduceMotion ? 0 : 1;
+  const yaw = cam.yaw + drift*0.035*Math.sin(t*0.11);
+  const pitch = cam.pitch + drift*0.02*Math.sin(t*0.083 + 1.3);
+  const R0 = fitDistance() + D*0.4;
+  let R = lerp(R0, 2.4, cam.dolly);
+  R *= 1 - drift*(0.012*low + 0.01*beatEnv);
+  let pos = [pivot[0] + R*Math.sin(yaw)*Math.cos(pitch), pivot[1] + R*Math.sin(pitch), pivot[2] + R*Math.cos(yaw)*Math.cos(pitch)];
+  if(pos[2] < 0.4){ pos[0] = clamp(pos[0], -BW+0.6, BW-0.6); pos[1] = clamp(pos[1], -BH+0.5, BH-0.5); pos[2] = Math.max(pos[2], -D+1); }
+  const target = v3.lerp(pivot, [pivot[0], pivot[1], -D], cam.dolly*0.5);
+  const fwd = v3.norm(v3.sub(target, pos));
+  const right = v3.norm(v3.cross(fwd, [0,1,0]));
+  const up = v3.cross(right, fwd);
+  cam.pos = pos; cam.fwd = fwd; cam.right = right; cam.up = up;
+  const asp = RW/RH, near = 0.05, far = 100, f = 1/TAN;
+  const proj = new Float32Array([f/asp,0,0,0, 0,f,0,0, 0,0,(far+near)/(near-far),-1, 0,0,2*far*near/(near-far),0]);
+  const view = new Float32Array([right[0],up[0],-fwd[0],0, right[1],up[1],-fwd[1],0, right[2],up[2],-fwd[2],0,
+    -v3.dot(right,pos), -v3.dot(up,pos), v3.dot(fwd,pos), 1]);
+  cam.vp = mat4mul(proj, view);
+}
+function rayFromScreen(x, y){
+  const nx = x/innerWidth*2-1, ny = 1 - y/innerHeight*2, asp = RW/RH;
+  return v3.norm(v3.add(v3.add(v3.mul(cam.right, nx*TAN*asp), v3.mul(cam.up, ny*TAN)), cam.fwd));
+}
+
+// ---------- 墙面坐标 ----------
+function netPx(p, w){
+  let u, v;
+  if(w===0){ u = D + p[0] + BW; v = D + p[1] + BH; }
+  else if(w===1){ u = -p[2]; v = D + p[1] + BH; }
+  else if(w===2){ u = D + 2*BW + p[2] + D; v = D + p[1] + BH; }
+  else if(w===3){ u = D + p[0] + BW; v = -p[2]; }
+  else { u = D + p[0] + BW; v = D + 2*BH + p[2] + D; }
+  return [u*S, v*S];
+}
+function hitWall(ro, rd){
+  let t0 = 0;
+  const inside = ro[2] <= 0 && Math.abs(ro[0]) < BW && Math.abs(ro[1]) < BH;
+  if(!inside){
+    if(!(rd[2] < 0 && ro[2] > 0)) return null;
+    t0 = -ro[2]/rd[2];
+    const p0 = v3.add(ro, v3.mul(rd, t0));
+    if(Math.abs(p0[0]) >= BW || Math.abs(p0[1]) >= BH) return null;
+  }
+  const o = v3.add(ro, v3.mul(rd, t0));
+  const tx = ((rd[0]>=0?BW:-BW) - o[0])/(rd[0]||1e-6);
+  const ty = ((rd[1]>=0?BH:-BH) - o[1])/(rd[1]||1e-6);
+  const tz = rd[2] < 0 ? (-D - o[2])/rd[2] : 1e9;
+  const t = Math.min(tx, ty, tz);
+  if(t > 1e8) return null;
+  const w = t===tz ? 0 : t===tx ? (rd[0]<0?1:2) : (rd[1]<0?3:4);
+  return { w, p: v3.add(o, v3.mul(rd, t)) };
+}
+// 把空间中的一点投到最近的墙上
+function projectToWall(p){
+  const d = [p[0]+BW, BW-p[0], p[1]+BH, BH-p[1], p[2]+D];
+  const ids = [1,2,3,4,0];
+  let m = 0; for(let i=1;i<5;i++) if(d[i] < d[m]) m = i;
+  const q = p.slice();
+  const w = ids[m];
+  if(w===1) q[0] = -BW; else if(w===2) q[0] = BW; else if(w===3) q[1] = -BH; else if(w===4) q[1] = BH; else q[2] = -D;
+  q[0] = clamp(q[0], -BW, BW); q[1] = clamp(q[1], -BH, BH); q[2] = clamp(q[2], -D, -0.15);
+  return { w, p: q };
+}
+// 房间里的一个随机点（体积内均匀），用于撒波源
+function randomPointInRoom(margin){
+  const m = margin === undefined ? 0.35 : margin;
+  return [rand(-BW+m, BW-m), rand(-BH+m, BH-m), rand(-D+0.2, -m)];
+}
+// 随机挑一个面，返回该面上的点与面编号；五个面按真实面积加权（后墙 > 侧墙 > 顶底）
+function randomPointOnFace(){
+  // 面积：后墙 2W*2H，顶/底 2W*D，左/右 2H*D
+  const aBack = 4*BW*BH, aTop = 4*BW*D, aSide = 4*BH*D;
+  const total = aBack + 2*aTop + 2*aSide;
+  let r = Math.random()*total;
+  if(r < aBack){                          // 后墙
+    const x = -BW + Math.random()*2*BW, y = -BH + Math.random()*2*BH;
+    return { w: 0, p: [x, y, -D] };
+  }
+  r -= aBack;
+  if(r < aTop){                           // 顶
+    return { w: 4, p: [-BW + Math.random()*2*BW, BH, -D + Math.random()*D] };
+  }
+  r -= aTop;
+  if(r < aTop){                           // 底
+    return { w: 3, p: [-BW + Math.random()*2*BW, -BH, -D + Math.random()*D] };
+  }
+  r -= aTop;
+  const left = r < aSide;
+  const z = -D + Math.random()*D;
+  return { w: left ? 1 : 2, p: [left ? -BW : BW, -BH + Math.random()*2*BH, z] };
+}
+
+// ---------- 波源队列 ----------
+const drops = [];
+function addDrop(px, py, r, s){ if(drops.length < 96) drops.push(px, py, r, s); }
+const dropP = [];
+function addDropP(phase, asym, ell, lobes){ if(dropP.length < 96) dropP.push(phase, asym, ell, lobes); }
+function spawnCluster(time, strength){
+  // 大部分直接落在某个面上（波纹各面都有），小部分撒在体积里再投到最近墙面
+  const n = 2 + (Math.random() < 0.55 ? 1 : 0) + (Math.random() < 0.3 ? 1 : 0);
+  for(let i=0;i<n;i++){
+    let hit;
+    if(Math.random() < 0.78){ hit = randomPointOnFace(); }
+    else { hit = projectToWall(randomPointInRoom()); }
+    const [x, y] = netPx(hit.p, hit.w);
+    addDrop(x, y, rand(2.2, 4.6), (Math.random()<0.5?-1:1)*rand(0.5, 1.0)*strength);
+    addDropP(rand(0,6.283), rand(0.55, 1.15), rand(0.85,1.15), 2 + Math.floor(rand(0,4)));
+  }
+}
+function bigRipple(time, power){
+  const hit = Math.random() < 0.8 ? randomPointOnFace() : projectToWall(randomPointInRoom());
+  const [x, y] = netPx(hit.p, hit.w);
+  addDrop(x, y, rand(13, 18), 0.9*power);
+  addDropP(rand(0,6.283), 0.7, 1, 3);
+  for(let i=0;i<6;i++){ const a = i/6*6.283 + rand(0,1); addDrop(x+Math.cos(a)*32, y+Math.sin(a)*32, 4.5, -0.35*power); }
+}
+
+// ---------- 音频：生成音乐 + 分析 ----------
+const audio = { ctx:null, analyser:null, freq:null, music:null, fileSrc:null, started:false, paused:false };
+const bands = { low:0, high:0, beatEnv:0, lowAgc:{lo:1,hi:0}, highAgc:{lo:1,hi:0}, fast:0, slow:0, armed:true, lastBeat:0, beat:false };
+
+function mtof(m){ return 440*Math.pow(2, (m-69)/12); }
+function makeIR(ctx, seconds, decay){
+  const len = Math.floor(ctx.sampleRate*seconds), buf = ctx.createBuffer(2, len, ctx.sampleRate);
+  for(let ch=0; ch<2; ch++){ const d = buf.getChannelData(ch); for(let i=0;i<len;i++) d[i] = (Math.random()*2-1)*Math.pow(1-i/len, decay); }
+  return buf;
+}
+function makeNoise(ctx, seconds){
+  const len = Math.floor(ctx.sampleRate*seconds), buf = ctx.createBuffer(1, len, ctx.sampleRate), d = buf.getChannelData(0);
+  for(let i=0;i<len;i++) d[i] = Math.random()*2-1;
+  return buf;
+}
+
+class Music {
+  constructor(ctx, out){
+    this.ctx = ctx; this.out = out;
+    this.bpm = 68; this.step16 = 60/this.bpm/4;
+    // 和声：D 利底亚色彩，夜晚感
+    this.chords = [
+      [50, 57, 61, 64, 66],   // Dmaj9
+      [47, 54, 57, 62, 64],   // Bm11
+      [43, 50, 54, 59, 61],   // Gmaj7#11
+      [45, 52, 57, 59, 64],   // Asus2
+    ];
+    this.penta = [74,76,78,81,83,86,88,90,93,95,98];
+    this.noise = makeNoise(ctx, 2);
+    // 总线
+    this.reverb = ctx.createConvolver(); this.reverb.buffer = makeIR(ctx, 5.5, 3.0);
+    this.revSend = ctx.createGain(); this.revSend.gain.value = 0.55;
+    this.revSend.connect(this.reverb); this.reverb.connect(out);
+    this.delay = ctx.createDelay(2); this.delay.delayTime.value = this.step16*3;
+    this.fb = ctx.createGain(); this.fb.gain.value = 0.38;
+    this.dlp = ctx.createBiquadFilter(); this.dlp.type = 'lowpass'; this.dlp.frequency.value = 6000;
+    this.delay.connect(this.dlp); this.dlp.connect(this.fb); this.fb.connect(this.delay);
+    this.dOut = ctx.createGain(); this.dOut.gain.value = 0.3; this.dlp.connect(this.dOut); this.dOut.connect(out); this.dOut.connect(this.revSend);
+
+    this.padFilter = ctx.createBiquadFilter(); this.padFilter.type = 'lowpass'; this.padFilter.frequency.value = 900; this.padFilter.Q.value = 0.6;
+    const lfo = ctx.createOscillator(), lfoG = ctx.createGain(); lfo.frequency.value = 0.07; lfoG.gain.value = 260;
+    lfo.connect(lfoG); lfoG.connect(this.padFilter.frequency); lfo.start();
+    this.padBus = ctx.createGain(); this.padBus.gain.value = 0.9;
+    this.padFilter.connect(this.padBus); this.padBus.connect(out); this.padBus.connect(this.revSend);
+
+    this.bellBus = ctx.createGain(); this.bellBus.gain.value = 0.9;
+    this.bellBus.connect(out); this.bellBus.connect(this.delay); this.bellBus.connect(this.revSend);
+
+    this.kickBus = ctx.createGain(); this.kickBus.gain.value = 1.0; this.kickBus.connect(out);
+    const kr = ctx.createGain(); kr.gain.value = 0.15; this.kickBus.connect(kr); kr.connect(this.revSend);
+
+    this.sub = ctx.createOscillator(); this.sub.type = 'sine'; this.sub.frequency.value = mtof(38);
+    this.subG = ctx.createGain(); this.subG.gain.value = 0;
+    this.sub.connect(this.subG); this.subG.connect(out); this.sub.start();
+
+    // 高频空气声（8–11 kHz）
+    this.air = ctx.createBufferSource(); this.air.buffer = this.noise; this.air.loop = true;
+    const abp = ctx.createBiquadFilter(); abp.type = 'bandpass'; abp.frequency.value = 9800; abp.Q.value = 1.4;
+    this.airG = ctx.createGain(); this.airG.gain.value = 0;
+    this.air.connect(abp); abp.connect(this.airG); this.airG.connect(out); this.airG.connect(this.revSend); this.air.start();
+
+    this.step = 0; this.loopStart = 4; this.next = 0; this.timer = null;
+  }
+  // 段落：bars 0-3 引子 | 4-11 绽放 | 12-19 高潮 | 20-27 平静 | 28-31 回升 → 回到 4
+  section(bar){
+    if(bar < 4) return 'intro';
+    const b = (bar - 4) % 28;
+    if(b < 8) return 'bloom';
+    if(b < 16) return 'peak';
+    if(b < 24) return 'calm';
+    return 'rise';
+  }
+  start(){
+    this.next = this.ctx.currentTime + 0.15;
+    this.timer = setInterval(()=>this.schedule(), 25);
+  }
+  stop(){ clearInterval(this.timer); this.timer = null; const t = this.ctx.currentTime;
+    [this.padBus.gain, this.bellBus.gain, this.kickBus.gain, this.subG.gain, this.airG.gain].forEach(g=>{ g.cancelScheduledValues(t); g.setTargetAtTime(0, t, 0.6); }); }
+  schedule(){
+    while(this.next < this.ctx.currentTime + 0.2){ this.play(this.step, this.next); this.next += this.step16; this.step++; }
+  }
+  play(step, t){
+    const s16 = step % 16, bar = Math.floor(step/16);
+    const sec = this.section(bar);
+    const chordIdx = Math.floor(bar/2) % 4, chord = this.chords[chordIdx];
+    const barDur = this.step16*16;
+    if(s16 === 0){
+      // 段落自动化
+      const cfg = { intro:[700,0.0,0.004,0.05], bloom:[1100,0.012,0.012,0.10], peak:[1700,0.022,0.02,0.14], calm:[520,0.0,0.0,0.07], rise:[900,0.006,0.008,0.09] }[sec];
+      this.padFilter.frequency.setTargetAtTime(cfg[0], t, 1.5);
+      this.airG.gain.setTargetAtTime(cfg[1], t, 1.2);
+      this.subMax = cfg[3];
+      if(bar % 2 === 0){
+        this.pad(chord, t, barDur*2);
+        this.sub.frequency.setTargetAtTime(mtof(chord[0]-12), t, 0.08);
+      }
+      // 低音按小节膨胀收缩 → 呼吸
+      this.subG.gain.cancelScheduledValues(t);
+      this.subG.gain.setTargetAtTime(this.subMax, t, 0.35);
+      this.subG.gain.setTargetAtTime(this.subMax*0.35, t + barDur*0.55, 0.6);
+    }
+    // 心跳式底鼓
+    const kickPat = { intro:[], bloom:[0,3,8,11], peak:[0,3,4,8,11,12], calm:[], rise:[0,8] }[sec];
+    if(kickPat.includes(s16)){
+      const soft = (s16 % 4 === 3) ? 0.45 : 1.0;
+      this.kick(t, (sec==='peak'?0.9:0.75)*soft);
+    }
+    // 铃音：高频密度随段落变化
+    let p = { intro:0.05, bloom:0.28, peak:0.46, calm:0.03, rise:0.08 + 0.3*((bar-4)%28-24)/4 }[sec];
+    if(Math.random() < p){
+      const n = this.penta[Math.floor(Math.pow(Math.random(), 0.8)*this.penta.length)];
+      this.bell(t + rand(0, 0.02), n, rand(0.4, 1.0), rand(-0.8, 0.8));
+    }
+    if(sec === 'peak' && step % 3 === 0){
+      const tones = chord.slice(1).map(m=>m+24);
+      this.bell(t, tones[(step/3|0) % tones.length], 0.45, Math.sin(step*0.7)*0.6);
+    }
+  }
+  pad(notes, t, dur){
+    const ctx = this.ctx;
+    for(const m of notes){
+      const g = ctx.createGain(); g.gain.value = 0; g.connect(this.padFilter);
+      const peak = 0.03;
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(peak, t + 2.4);
+      g.gain.setValueAtTime(peak, t + dur);
+      g.gain.linearRampToValueAtTime(0, t + dur + 3.2);
+      for(const det of [-7, 7]){
+        const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = mtof(m); o.detune.value = det + rand(-3,3);
+        o.connect(g); o.start(t); o.stop(t + dur + 3.3);
+      }
+    }
+  }
+  kick(t, vel){
+    const ctx = this.ctx, o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(118, t); o.frequency.exponentialRampToValueAtTime(43, t + 0.16);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vel, t + 0.006); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.55);
+    o.connect(g); g.connect(this.kickBus); o.start(t); o.stop(t + 0.6);
+  }
+  bell(t, midi, vel, pan){
+    const ctx = this.ctx, f = mtof(midi);
+    const pn = ctx.createStereoPanner(); pn.pan.value = pan; pn.connect(this.bellBus);
+    const env = ctx.createGain(); env.connect(pn);
+    env.gain.setValueAtTime(0.0001, t); env.gain.exponentialRampToValueAtTime(0.09*vel, t + 0.004); env.gain.exponentialRampToValueAtTime(0.0001, t + 3.2);
+    const car = ctx.createOscillator(); car.frequency.value = f;
+    const mod = ctx.createOscillator(); mod.frequency.value = f*3.51;
+    const mg = ctx.createGain(); mg.gain.setValueAtTime(f*2.2*vel, t); mg.gain.exponentialRampToValueAtTime(f*0.04, t + 1.3);
+    mod.connect(mg); mg.connect(car.frequency); car.connect(env);
+    const p2 = ctx.createOscillator(); p2.frequency.value = f*2.756;
+    const g2 = ctx.createGain(); g2.gain.setValueAtTime(0.0001, t); g2.gain.exponentialRampToValueAtTime(0.035*vel, t + 0.003); g2.gain.exponentialRampToValueAtTime(0.0001, t + 0.9);
+    p2.connect(g2); g2.connect(pn);
+    // 玻璃般的高频闪光
+    const ns = ctx.createBufferSource(); ns.buffer = this.noise;
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = rand(8500, 11000); bp.Q.value = 3;
+    const ng = ctx.createGain(); ng.gain.setValueAtTime(0.0001, t); ng.gain.exponentialRampToValueAtTime(0.06*vel, t + 0.002); ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+    ns.connect(bp); bp.connect(ng); ng.connect(pn);
+    [car, mod, p2].forEach(o=>{ o.start(t); o.stop(t + 3.3); });
+    ns.start(t, Math.random()*1.5, 0.15);
+  }
+}
+
+function initAudio(){
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ctx = new AC();
+  const master = ctx.createGain(); master.gain.value = 0.9;
+  const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -18; comp.ratio.value = 3; comp.attack.value = 0.01; comp.release.value = 0.25;
+  const an = ctx.createAnalyser(); an.fftSize = 2048; an.smoothingTimeConstant = 0.55; an.minDecibels = -95; an.maxDecibels = -20;
+  master.connect(comp); comp.connect(an); an.connect(ctx.destination);
+  audio.ctx = ctx; audio.master = master; audio.analyser = an; audio.freq = new Uint8Array(an.frequencyBinCount);
+  audio.music = new Music(ctx, master);
+  audio.music.start();
+  audio.started = true;
+  ctx.resume();
+}
+function bandAvg(lo, hi){
+  const f = audio.freq, binHz = audio.ctx.sampleRate/audio.analyser.fftSize;
+  const a = Math.max(1, Math.floor(lo/binHz)), b = Math.min(f.length-1, Math.ceil(hi/binHz));
+  let s = 0; for(let i=a;i<=b;i++) s += f[i];
+  return s/((b-a+1)*255);
+}
+function agc(st, raw, dt){
+  st.hi = Math.max(raw, st.hi - dt*0.025);
+  st.lo = Math.min(raw, st.lo + dt*0.015);
+  const r = st.hi - st.lo;
+  return r > 0.05 ? clamp((raw - st.lo)/r) : 0;
+}
+function analyse(dt, t){
+  bands.beat = false;
+  if(!audio.started || audio.paused || audio.ctx.state !== 'running'){
+    // 进入前：无声的“预演”，让画面保持轻微呼吸
+    const idleHigh = 0.18 + 0.12*Math.sin(t*0.4);
+    bands.high = lerp(bands.high, idleHigh, 1-Math.exp(-dt*2));
+    bands.low = lerp(bands.low, 0.3 + 0.2*Math.sin(t*0.6), 1-Math.exp(-dt*2));
+    if(t - bands.lastBeat > 3.53){ bands.lastBeat = t; bands.beat = true; }
+  } else {
+    audio.analyser.getByteFrequencyData(audio.freq);
+    const lowRaw = bandAvg(30, 160), highRaw = bandAvg(4500, 12500), kick = bandAvg(38, 110);
+    bands.low = lerp(bands.low, agc(bands.lowAgc, lowRaw, dt), 1-Math.exp(-dt*8));
+    bands.high = lerp(bands.high, agc(bands.highAgc, highRaw, dt), 1-Math.exp(-dt*6));
+    bands.fast = lerp(bands.fast, kick, 1-Math.exp(-dt*30));
+    bands.slow = lerp(bands.slow, kick, 1-Math.exp(-dt*2.5));
+    const d = bands.fast - bands.slow;
+    if(bands.armed && d > 0.06 && t - bands.lastBeat > 0.28){ bands.beat = true; bands.armed = false; bands.lastBeat = t; }
+    if(d < 0.025) bands.armed = true;
+  }
+  if(bands.beat) bands.beatEnv = 1;
+  bands.beatEnv *= Math.exp(-dt*3.2);
+}
+
+// ---------- 交互 ----------
+const gate = $('gate'), hud = $('hud'), credit = $('credit'), toast = $('toast');
+function say(msg){ toast.textContent = msg; toast.classList.add('show'); clearTimeout(say.t); say.t = setTimeout(()=>toast.classList.remove('show'), 2600); }
+$('enter').addEventListener('click', ()=>{
+  try{ initAudio(); }catch(e){ say('无法启动音频：' + e.message); }
+  gate.classList.add('gone');
+  hud.hidden = false; credit.hidden = false;
+  canvas.focus?.();
+});
+function setLook(x, y){
+  const mx = x/innerWidth*2-1, my = y/innerHeight*2-1;
+  cam.tYaw = -mx*0.42; cam.tPitch = my*0.2;
+}
+addEventListener('pointermove', e=>setLook(e.clientX, e.clientY));
+addEventListener('wheel', e=>{ cam.tDolly = clamp(cam.tDolly + e.deltaY*-0.0009, 0, 0.82); }, {passive:true});
+let downAt = null;
+canvas.addEventListener('pointerdown', e=>{ downAt = [e.clientX, e.clientY]; });
+canvas.addEventListener('pointerup', e=>{
+  if(!downAt || Math.hypot(e.clientX-downAt[0], e.clientY-downAt[1]) > 8) return;
+  const hit = hitWall(cam.pos, rayFromScreen(e.clientX, e.clientY));
+  if(hit){ const [x, y] = netPx(hit.p, hit.w); clickQueue.push([x, y]); }
+});
+const clickQueue = [];
+addEventListener('keydown', e=>{
+  if(e.code === 'KeyH'){ document.body.classList.toggle('hidden-ui'); }
+  if(e.code === 'Space' && audio.started && !(e.target instanceof HTMLButtonElement)){
+    e.preventDefault();
+    setPaused(!audio.paused);
+    say(audio.paused ? '已暂停' : '继续播放');
+  }
+});
+// ---------- 本地音乐 ----------
+const trackName = $('trackName'), useGenBtn = $('useGen'), pauseBtn = $('pause'), fileInput = $('file');
+function enterIfNeeded(){
+  if(!audio.started){ initAudio(); gate.classList.add('gone'); hud.hidden = false; credit.hidden = false; }
+}
+function resetAgc(){ bands.lowAgc = {lo:1,hi:0}; bands.highAgc = {lo:1,hi:0}; }
+function setPaused(p){
+  if(!audio.started) return;
+  audio.paused = p;
+  if(p) audio.ctx.suspend(); else audio.ctx.resume();
+  pauseBtn.textContent = p ? '继续' : '暂停';
+  credit.classList.toggle('paused', p);
+}
+async function loadFile(file){
+  if(!file) return;
+  enterIfNeeded();
+  trackName.textContent = '正在读取：' + file.name;
+  try{
+    const buf = await audio.ctx.decodeAudioData(await file.arrayBuffer());
+    audio.music.stop();
+    if(audio.fileSrc){ try{ audio.fileSrc.stop(); }catch(e){} }
+    const src = audio.ctx.createBufferSource(); src.buffer = buf; src.loop = true; src.connect(audio.master); src.start();
+    audio.fileSrc = src;
+    resetAgc();
+    setPaused(false);
+    trackName.textContent = file.name.replace(/\.[^.]+$/, '');
+    trackName.title = file.name;
+    useGenBtn.hidden = false;
+    say('正在播放：' + file.name);
+  }catch(err){
+    trackName.textContent = audio.fileSrc ? trackName.title : '生成音乐：夜色铃音';
+    say('无法解码这个文件，请换成 mp3、wav、m4a 或 flac。');
+  }
+}
+function useGenerated(){
+  if(audio.fileSrc){ try{ audio.fileSrc.stop(); }catch(e){} audio.fileSrc = null; }
+  audio.music = new Music(audio.ctx, audio.master);
+  audio.music.start();
+  resetAgc();
+  setPaused(false);
+  trackName.textContent = '生成音乐：夜色铃音'; trackName.title = '';
+  useGenBtn.hidden = true;
+  say('已切回生成音乐');
+}
+$('pick').addEventListener('click', ()=>fileInput.click());
+$('enterFile').addEventListener('click', ()=>{ enterIfNeeded(); fileInput.click(); });
+fileInput.addEventListener('change', ()=>{ loadFile(fileInput.files[0]); fileInput.value = ''; });
+useGenBtn.addEventListener('click', useGenerated);
+pauseBtn.addEventListener('click', ()=>setPaused(!audio.paused));
+addEventListener('dragover', e=>{ e.preventDefault(); document.body.classList.add('dragging'); });
+addEventListener('dragleave', e=>{ if(!e.relatedTarget) document.body.classList.remove('dragging'); });
+addEventListener('drop', e=>{ e.preventDefault(); document.body.classList.remove('dragging'); loadFile(e.dataTransfer.files[0]); });
+
+// ---------- 主循环 ----------
+let last = performance.now()/1000, spawnAcc = 0, simAcc = 0, focusDist = 14;
+const SIM_HZ = 120;
+let frameAvg = 1/60, lastQ = 0;
+const beamA = [-BW*0.35, BH + 3.0, 1.5];
+const beamDir = v3.norm(v3.sub([BW*0.3, -BH, -D*0.65], beamA));
+const dropArr = new Float32Array(96);
+const dropPArr = new Float32Array(96);
+const mLow = $('mLow'), mHigh = $('mHigh'), mBeat = $('mBeat');
+
+function frame(){
+  const now = performance.now()/1000;
+  const dt = Math.min(0.05, now - last); last = now;
+  const t = now;
+  // 帧率过低时自动降低渲染分辨率
+  frameAvg = lerp(frameAvg, dt, 0.05);
+  if(now - lastQ > 2){
+    if(frameAvg > 1/38 && quality > 0.5){ quality = Math.max(0.5, quality - 0.15); lastQ = now; }
+    else if(frameAvg < 1/57 && quality < 1){ quality = Math.min(1, quality + 0.1); lastQ = now; }
+  }
+  resize();
+  analyse(dt, t);
+  const {low, high, beatEnv} = bands;
+  updateCamera(dt, t, low, beatEnv);
+
+  // 固定步长：每秒 120 步，单帧最多 4 步，慢机器上画面变慢但不会糊成一片
+  simAcc = Math.min(simAcc + dt*SIM_HZ, 4);
+  const steps = Math.floor(simAcc); simAcc -= steps;
+  const simDt = steps/SIM_HZ;
+  // 高频 → 波源数量与亮度
+  spawnAcc += simDt*(4.5 + 14.0*Math.pow(high, 1.4));
+  while(spawnAcc >= 1){ spawnAcc -= 1; spawnCluster(t, 0.7 + 0.6*high); }
+  // 节拍 → 大涟漪
+  if(bands.beat) bigRipple(t, 0.6 + 0.4*low);
+  while(clickQueue.length){ const [x, y] = clickQueue.shift(); addDrop(x, y, 11, 1.1); addDropP(rand(0,6.283), 0.8, 1, 3); addDrop(x, y, 4, -0.5); addDropP(rand(0,6.283), 0.6, 1, 4); }
+
+  // 1. 波动模拟
+  gl.bindVertexArray(quadVAO);
+  gl.disable(gl.BLEND);
+  gl.viewport(0, 0, SIM_W, SIM_H);
+  gl.useProgram(P.sim);
+  gl.uniform2f(U(P.sim,'uSize'), SIM_W, SIM_H);
+  gl.uniform3f(U(P.sim,'uNet'), D*S, 2*BW*S, 2*BH*S);
+  gl.uniform1f(U(P.sim,'uDamp'), 0.9825 + 0.004*low);
+  gl.uniform1i(U(P.sim,'uPrev'), 0);
+  for(let sub=0; sub<steps; sub++){
+    const n = sub === 0 ? drops.length/4 : 0;
+    if(n){ dropArr.fill(0); dropArr.set(drops); dropPArr.fill(0); dropPArr.set(dropP); gl.uniform4fv(U(P.sim,'uDrops'), dropArr); gl.uniform4fv(U(P.sim,'uDropP'), dropPArr); }
+    gl.uniform1i(U(P.sim,'uDropCount'), n);
+    bindTex(0, sim[simI].tex);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, sim[1-simI]);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    simI = 1 - simI;
+  }
+  drops.length = 0; dropP.length = 0;
+
+  // 2. 焦散光照（网格空间，带拖影）
+  gl.useProgram(P.light);
+  gl.uniform2f(U(P.light,'uSize'), SIM_W, SIM_H);
+  gl.uniform3f(U(P.light,'uNet'), D*S, 2*BW*S, 2*BH*S);
+  gl.uniform1f(U(P.light,'uK'), 45*(0.85 + 0.35*high));
+  gl.uniform1f(U(P.light,'uTrail'), Math.pow(0.78, dt*60));
+  gl.uniform1f(U(P.light,'uGain'), 0.38 + 0.16*high + 0.08*beatEnv);
+  gl.uniform1f(U(P.light,'uDisp'), 0.35 + 0.3*beatEnv);
+  gl.uniform1i(U(P.light,'uSim'), 0); gl.uniform1i(U(P.light,'uPrev'), 1);
+  bindTex(0, sim[simI].tex); bindTex(1, light[lightI].tex);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, light[1-lightI]);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  lightI = 1 - lightI;
+  gl.bindTexture(gl.TEXTURE_2D, light[lightI].tex);
+  gl.generateMipmap(gl.TEXTURE_2D);
+
+  // 3. 场景
+  gl.bindFramebuffer(gl.FRAMEBUFFER, sceneF);
+  gl.viewport(0, 0, RW, RH);
+  gl.useProgram(P.scene);
+  gl.uniform2f(U(P.scene,'uRes'), RW, RH);
+  gl.uniform3fv(U(P.scene,'uCam'), cam.pos);
+  gl.uniformMatrix3fv(U(P.scene,'uRot'), false, [...cam.right, ...cam.up, ...cam.fwd.map(x=>-x)]);
+  gl.uniform1f(U(P.scene,'uTan'), TAN);
+  gl.uniform3f(U(P.scene,'uBox'), BW, BH, D);
+  gl.uniform2f(U(P.scene,'uNet'), NET_W, NET_H);
+  gl.uniform1f(U(P.scene,'uS'), S);
+  gl.uniform1f(U(P.scene,'uTime'), t % 1000);
+  gl.uniform1f(U(P.scene,'uLow'), low);
+  gl.uniform1f(U(P.scene,'uHigh'), high);
+  gl.uniform1f(U(P.scene,'uBeat'), reduceMotion ? beatEnv*0.3 : beatEnv);
+  const fh = hitWall(cam.pos, cam.fwd);
+  const fTarget = fh ? Math.hypot(...v3.sub(fh.p, cam.pos)) : 14;
+  focusDist = lerp(focusDist, fTarget, 1 - Math.exp(-dt*2));
+  gl.uniform1f(U(P.scene,'uFocus'), focusDist);
+  gl.uniform1f(U(P.scene,'uLightGain'), 0.75 + 0.35*high);
+  gl.uniform3fv(U(P.scene,'uBeamA'), beamA);
+  gl.uniform3fv(U(P.scene,'uBeamDir'), beamDir);
+  gl.uniform1i(U(P.scene,'uLight'), 0);
+  bindTex(0, light[lightI].tex);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  // 4. 尘埃（叠加）
+  gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+  gl.useProgram(P.dust);
+  gl.uniformMatrix4fv(U(P.dust,'uVP'), false, cam.vp);
+  gl.uniform3fv(U(P.dust,'uCam'), cam.pos);
+  gl.uniform3f(U(P.dust,'uBox'), BW, BH, D);
+  gl.uniform3fv(U(P.dust,'uBeamA'), beamA);
+  gl.uniform3fv(U(P.dust,'uBeamDir'), beamDir);
+  gl.uniform1f(U(P.dust,'uTime'), t % 1000);
+  gl.uniform1f(U(P.dust,'uPx'), RH/(2*TAN));
+  gl.uniform1f(U(P.dust,'uHigh'), high);
+  gl.uniform1f(U(P.dust,'uLow'), low);
+  gl.uniform1f(U(P.dust,'uBeat'), beatEnv);
+  gl.bindVertexArray(dustVAO);
+  gl.drawArrays(gl.POINTS, 0, DUST_N);
+  gl.disable(gl.BLEND);
+  gl.bindVertexArray(quadVAO);
+
+  // 5. 辉光
+  const bw = bloomA.tex.w, bh = bloomA.tex.h;
+  gl.viewport(0, 0, bw, bh);
+  gl.useProgram(P.bright);
+  gl.uniform2f(U(P.bright,'uTexel'), 1/RW, 1/RH);
+  gl.uniform1i(U(P.bright,'uTex'), 0);
+  bindTex(0, sceneF.tex);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, bloomA);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  gl.useProgram(P.streak);
+  gl.uniform1i(U(P.streak,'uTex'), 0);
+  gl.uniform2f(U(P.streak,'uTexel'), 1/bw, 1/bh);
+  gl.uniform1f(U(P.streak,'uRot'), 0.3 + 0.06*Math.sin(t*0.09) + 0.02*Math.sin(t*0.37));
+  gl.uniform1f(U(P.streak,'uLen'), 0.75 + 0.5*high + 0.25*beatEnv);
+  gl.uniform1f(U(P.streak,'uSoft'), 0.26 - 0.06*high);
+  bindTex(0, bloomA.tex);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, streakF);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  gl.useProgram(P.blur);
+  gl.uniform1i(U(P.blur,'uTex'), 0);
+  for(let i=0;i<2;i++){
+    gl.uniform2f(U(P.blur,'uDir'), (1+i)/bw, 0); bindTex(0, bloomA.tex); gl.bindFramebuffer(gl.FRAMEBUFFER, bloomB); gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.uniform2f(U(P.blur,'uDir'), 0, (1+i)/bh); bindTex(0, bloomB.tex); gl.bindFramebuffer(gl.FRAMEBUFFER, bloomA); gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+
+  // 6. 合成到屏幕
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, RW, RH);
+  gl.useProgram(P.comp);
+  gl.uniform1i(U(P.comp,'uScene'), 0); gl.uniform1i(U(P.comp,'uBloom'), 1); gl.uniform1i(U(P.comp,'uStreak'), 2);
+  gl.uniform1f(U(P.comp,'uStar'), 0.55 + 0.45*high + 0.3*beatEnv);
+  gl.uniform1f(U(P.comp,'uTime'), t % 1000);
+  gl.uniform1f(U(P.comp,'uLow'), low);
+  gl.uniform1f(U(P.comp,'uBeat'), reduceMotion ? beatEnv*0.3 : beatEnv);
+  gl.uniform2f(U(P.comp,'uRes'), RW, RH);
+  bindTex(0, sceneF.tex); bindTex(1, bloomA.tex); bindTex(2, streakF.tex);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+  // HUD
+  if(!hud.hidden){
+    mLow.style.setProperty('--v', low.toFixed(3));
+    mHigh.style.setProperty('--v', high.toFixed(3));
+    mBeat.style.setProperty('--v', beatEnv.toFixed(3));
+  }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
